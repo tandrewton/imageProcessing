@@ -3,8 +3,10 @@ clear
 close all
 %first, use ffmpeg -i pcbi_mixed_modes_healing_murrellBanerjee.mp4  healingStack%02d.bmp
 %%
-numFrames = 1;
-writerObj = VideoWriter('segmentedWoundHealingVideo.mp4', 'MPEG-4');
+numFrames = 92;
+showShapeHistogram = 0;
+healingTypeStr = "TetleyStaddonWT";
+writerObj = VideoWriter(healingTypeStr+".mp4", 'MPEG-4');
 writerObj.FrameRate = 5;
 open(writerObj);
 
@@ -13,27 +15,33 @@ for ii=1:numFrames
     imgFolder = "videosForImageJ/";
     set(0,'DefaultFigureWindowStyle','docked')
     
-    %frameii = imgFolder + "healingStack"+sprintf('%02d',ii)+".bmp";
-    frameii = imgFolder + "embryoHealed.bmp";
+    frameii = imgFolder + healingTypeStr+"_healing_"+sprintf('%02d',ii)+".bmp";
     originalImage = imread(frameii);
     
-    figure(1)
-    imshow(originalImage)
-    set(gca, 'YDir', 'normal')
+    %figure(1)
+    %imshow(originalImage)
+    %set(gca, 'YDir', 'normal')
     
     gray1 = im2gray(originalImage);
     
-    figure(2)
-    [BWmask, maskedImage1] = createMask_lighter(originalImage);
-    
-    imshow(BWmask)
+    % mask for murrellBanerjee
+    %[BWmask, maskedImage1] = createMask_lighter(originalImage);
 
-    %structuring element for imdilate
-    se1 = strel('line',6,0);
-    se2 = strel('line',6,90);
+    %figure(2)
+
+    % mask for tetley-staddon
+    [BWmask, maskedImage1] = createMaskTetleyStaddon(originalImage);
+    %BWmask = ~BWmask;
+    %imshow(BWmask)
+    %set(gca, 'YDir', 'normal')
+
+    %structuring element for imdilate (use 6,0 and 6,90 for
+    %murrellBanerjee)
+    se1 = strel('line',2,0);
+    se2 = strel('line',2,90);
     %imshow(imdilate(~BWmask,[se1 se2]))
-    set(gca, 'YDir', 'normal')
-    %BWmask = ~imdilate(~BWmask,[se1 se2]);
+    %set(gca, 'YDir', 'normal')
+    BWmask = ~imdilate(~BWmask,[se1 se2]);
     
     %% BWmask is the base image we're going to work with using blob counting
     % get labels for connected objects in BWmask (polygons)
@@ -68,15 +76,17 @@ for ii=1:numFrames
     centroid_array = zeros(numberOfBoundaries,2);
     boxEdgeMask = zeros(numberOfBoundaries,1,'logical');
     
-    pixelBuffer = 1;
+    pixelBuffer = 10;
     for kk = 1 : numberOfBoundaries
 	    thisBoundary = boundaries{kk};
 	    %plot(thisBoundary(:,2), thisBoundary(:,1), 'g', 'LineWidth', 2);
         %poly_kk = polyshape(thisBoundary(:,2),thisBoundary(:,1));
+        
         P_reduced = reducepoly(thisBoundary,0.01);
         %reducepoly to reduce vertex density and do some smoothing
         plot(P_reduced(:,2), P_reduced(:,1), 'r', 'linewidth', 1);
         poly_kk = polyshape(P_reduced(:,2),P_reduced(:,1));
+        
         a_array(kk) = area(poly_kk);
         pmeter_array(kk) = perimeter(poly_kk);
         vertices = poly_kk.Vertices;
@@ -90,9 +100,8 @@ for ii=1:numFrames
     %figure(6)
 
     %area mask thresholds polygons based on their areas
-    sorted_areas = sort(a_array);
-    lowBoundAreas = sorted_areas(2);
-    upBoundAreas = sorted_areas(end-1);
+    lowBoundAreas = 0.05*1e4;
+    upBoundAreas = 1e4;
     areaMask = (a_array > lowBoundAreas) & (a_array < upBoundAreas);
 
     compositeMask = boxEdgeMask & areaMask;
@@ -128,18 +137,19 @@ for ii=1:numFrames
     %ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
     %ylim([0 10])
 
-    figure(6)
-    %histAx = axes('Position', [.7 .7   .25 .25]);
-    %box on
-    histEdges = 1.0:0.04:5.0;
-    histogram(shapeParameters,histEdges);
-    xticks(1.0:0.5:10.0);
-    xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylim([0 2])
-    annotation('textbox',[.75 .8 .1 .1], 'edgecolor', 'none', 'string', "mean="+num2str(mean(shapeParameters)))
-    annotation('textbox',[.75 .77 .1 .1], 'edgecolor', 'none', 'string', "std="+num2str(std(shapeParameters)))
-
+    if (showShapeHistogram)
+        figure(5)
+        histAx = axes('Position', [.7 .7   .25 .25]);
+        box on
+        histEdges = 1.0:0.05:4.0;
+        histogram(shapeParameters,histEdges);
+        xticks(1.0:0.5:4.0);
+        xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
+        ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
+        ylim([0 20])
+        annotation('textbox',[.75 .8 .1 .1], 'edgecolor', 'none', 'string', "mean="+num2str(mean(shapeParameters)))
+        annotation('textbox',[.75 .77 .1 .1], 'edgecolor', 'none', 'string', "std="+num2str(std(shapeParameters)))
+    end
     currframe = getframe(gcf);
     writeVideo(writerObj,currframe);
 end

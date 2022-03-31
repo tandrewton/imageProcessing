@@ -1,6 +1,14 @@
 clc
 clear
 close all
+
+% convert tif output of tissue analyzer into polygons
+
+imageFolder = "/Users/AndrewTon/Documents/YalePhD/projects/imageProcessing/";
+subPath = "woundHealingVideos/Drosophila/Wood_et_al_Nat_Cell_Bio_2002/mov1-WT/healingStack54/";
+filename = "handCorrection.tif";
+fullPath = imageFolder + subPath + filename;
+
 %first, use ffmpeg -i pcbi_mixed_modes_healing_murrellBanerjee.mp4  healingStack%02d.bmp
 %%
 numFrames = 1;
@@ -10,11 +18,10 @@ open(writerObj);
 
 for ii=1:numFrames
     clf
-    imgFolder = "videosForImageJ/";
     set(0,'DefaultFigureWindowStyle','docked')
     
     %frameii = imgFolder + "healingStack"+sprintf('%02d',ii)+".bmp";
-    frameii = imgFolder + "embryoHealed.bmp";
+    frameii = fullPath;
     originalImage = imread(frameii);
     
     figure(1)
@@ -68,6 +75,7 @@ for ii=1:numFrames
     centroid_array = zeros(numberOfBoundaries,2);
     boxEdgeMask = zeros(numberOfBoundaries,1,'logical');
     
+    vertexPositions = [];
     pixelBuffer = 1;
     for kk = 1 : numberOfBoundaries
 	    thisBoundary = boundaries{kk};
@@ -91,56 +99,41 @@ for ii=1:numFrames
 
     %area mask thresholds polygons based on their areas
     sorted_areas = sort(a_array);
-    lowBoundAreas = sorted_areas(2);
-    upBoundAreas = sorted_areas(end-1);
+    [~,sort_order] = sort(pmeter_array);
+    lowBoundAreas = sorted_areas(1);
+    upBoundAreas = sorted_areas(end-2);
     areaMask = (a_array > lowBoundAreas) & (a_array < upBoundAreas);
 
     compositeMask = boxEdgeMask & areaMask;
-    
-    %scatter(pmeter_array(areaMask),a_array(areaMask),'filled','k')
-    %ylabel('polygon area', 'fontsize',24)
-    %xlabel('polygon perimeter', 'fontsize',24)
-    %title('areaMask test')
-    
-    %figure(7)
-    %scatter(pmeter_array(boxEdgeMask),a_array(boxEdgeMask),'filled','k')
-    %ylabel('polygon area', 'fontsize',24)
-    %xlabel('polygon perimeter', 'fontsize',24)
-    %title('boxEdgeMask test')
-    
-    %figure(8)
-    %scatter(pmeter_array(compositeMask),a_array(compositeMask),'filled','k')
-    %ylabel('polygon area', 'fontsize',24)
-    %xlabel('polygon perimeter', 'fontsize',24)
-    %title('compositeMask test')
     
     filteredPerimeter = pmeter_array(compositeMask);
     filteredArea = a_array(compositeMask);
     shapeParameters = filteredPerimeter.^2 ./ filteredArea / (4*pi);
     
     scatter(centroid_array(compositeMask,1), centroid_array(compositeMask,2),'k','x')
-    
-    %figure(9)
-    %histEdges = 1.0:0.04:3.0;
-    %histogram(shapeParameters,histEdges);
-    %xticks([1.0:0.4:3.0])
-    %xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    %ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    %ylim([0 10])
-
-    figure(6)
-    %histAx = axes('Position', [.7 .7   .25 .25]);
-    %box on
-    histEdges = 1.0:0.04:5.0;
-    histogram(shapeParameters,histEdges);
-    xticks(1.0:0.5:10.0);
-    xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylim([0 2])
-    annotation('textbox',[.75 .8 .1 .1], 'edgecolor', 'none', 'string', "mean="+num2str(mean(shapeParameters)))
-    annotation('textbox',[.75 .77 .1 .1], 'edgecolor', 'none', 'string', "std="+num2str(std(shapeParameters)))
-
+   
     currframe = getframe(gcf);
     writeVideo(writerObj,currframe);
 end
 close(writerObj)
+
+% for each valid segmented cell, record vertex positions separated by nans
+% and a header
+for kk = 1:numberOfBoundaries
+    ii = sort_order(kk);
+    thisBoundary = boundaries{ii};
+    if (compositeMask(ii) == false)
+        continue;
+    end
+    % fill vertexPositions with a header
+    vertexPositions = [vertexPositions; nan nan];
+    vertexPositions = [vertexPositions; kk length(thisBoundary(:,1))];
+    for jj = 1:length(thisBoundary(:,1))
+        %fill vertexPositions with lines of coordinates
+        vertexPositions = [vertexPositions; thisBoundary(jj,1) thisBoundary(jj,2)];
+    end
+end
+figure(6)
+scatter(vertexPositions(:,2), vertexPositions(:,1),'rx')
+daspect([1 1 1])
+set(gca, 'Ydir', 'reverse')

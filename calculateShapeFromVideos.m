@@ -3,8 +3,11 @@ clear
 close all
 %first, use ffmpeg -i pcbi_mixed_modes_healing_murrellBanerjee.mp4  healingStack%02d.bmp
 %%
-numFrames = 82;
-writerObj = VideoWriter('segmentedWoundHealingVideo.mp4', 'MPEG-4');
+numFrames = 51;
+showShapeHistogram = 0;
+showAxis = 0;
+healingTypeStr = "mixed_modes";
+writerObj = VideoWriter(healingTypeStr+".mp4", 'MPEG-4');
 writerObj.FrameRate = 5;
 open(writerObj);
 
@@ -13,7 +16,7 @@ for ii=1:numFrames
     imgFolder = "videosForImageJ/";
     set(0,'DefaultFigureWindowStyle','docked')
     
-    frameii = imgFolder + "healingStack"+sprintf('%02d',ii)+".bmp";
+    frameii = imgFolder + healingTypeStr+"_healing"+sprintf('%02d',ii)+".bmp";
     originalImage = imread(frameii);
     
     %figure(1)
@@ -53,7 +56,7 @@ for ii=1:numFrames
     % bwboundaries() returns a cell array, where each cell contains the row/column coordinates for an object in the image.
     figure(5)
     %imshow(BWmask);
-    %set(gca, 'YDir', 'normal')
+    set(gca, 'YDir', 'reverse')
     
     hold on;
     % store box dimensions for boxEdgeMask, which throws out polygons too close
@@ -70,8 +73,17 @@ for ii=1:numFrames
     pixelBuffer = 30;
     for kk = 1 : numberOfBoundaries
 	    thisBoundary = boundaries{kk};
-	    plot(thisBoundary(:,2), thisBoundary(:,1), 'g', 'LineWidth', 2);
-        poly_kk = polyshape(thisBoundary(:,2),thisBoundary(:,1));
+	    %plot(thisBoundary(:,2), thisBoundary(:,1), 'g', 'LineWidth', 2);
+        %poly_kk = polyshape(thisBoundary(:,2),thisBoundary(:,1));
+        % reduce polygon vertex density and do some smoothing
+        P_reduced = reducepoly(thisBoundary, 0.05);
+        
+        plot(P_reduced(:,2), P_reduced(:,1), 'r', 'linewidth', 1);
+        poly_kk = polyshape(P_reduced(:,2),P_reduced(:,1));
+        if (~showAxis)
+            axis off
+        end
+
         a_array(kk) = area(poly_kk);
         pmeter_array(kk) = perimeter(poly_kk);
         vertices = poly_kk.Vertices;
@@ -122,17 +134,19 @@ for ii=1:numFrames
     %ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
     %ylim([0 10])
 
-    figure(5)
-    histAx = axes('Position', [.7 .7   .25 .25]);
-    box on
-    histEdges = 1.0:0.04:3.0;
-    histogram(shapeParameters,histEdges);
-    xticks(1.0:0.4:3.0);
-    xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
-    ylim([0 10])
-    annotation('textbox',[.75 .8 .1 .1], 'edgecolor', 'none', 'string', "mean="+num2str(mean(shapeParameters)))
-    annotation('textbox',[.75 .77 .1 .1], 'edgecolor', 'none', 'string', "std="+num2str(std(shapeParameters)))
+    if (showShapeHistogram)
+        figure(5)
+        histAx = axes('Position', [.7 .7   .25 .25]);
+        box on
+        histEdges = 1.0:0.05:4.0;
+        histogram(shapeParameters,histEdges);
+        xticks(1.0:0.5:4.0);
+        xlabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
+        ylabel('$\mathcal{A}$','Interpreter','LaTeX','Fontsize',16)
+        ylim([0 10])
+        annotation('textbox',[.75 .8 .1 .1], 'edgecolor', 'none', 'string', "mean="+num2str(mean(shapeParameters)))
+        annotation('textbox',[.75 .77 .1 .1], 'edgecolor', 'none', 'string', "std="+num2str(std(shapeParameters)))
+    end
 
     currframe = getframe(gcf);
     writeVideo(writerObj,currframe);
