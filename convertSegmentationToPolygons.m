@@ -1,8 +1,12 @@
 clc
 clear
 close all
-
+set(0,'DefaultFigureWindowStyle','docked')
 % convert tif output of tissue analyzer into polygons
+
+%parameter list
+reducePolyTolerance = [0.01,0.02]; 
+%tolerance for reducePoly algorithm
 
 imageFolder = "/Users/AndrewTon/Documents/YalePhD/projects/imageProcessing/";
 %subPath = "woundHealingVideos/Drosophila/Wood_et_al_Nat_Cell_Bio_2002/mov1-WT/healingStack54/";
@@ -11,28 +15,17 @@ subPath = "woundHealingVideos/Drosophila/Tetley_et_al_Nat_Phys_2019/embryoHealed
 filename = "handCorrection.tif";
 fullPath = imageFolder + subPath + filename;
 
-clf
-set(0,'DefaultFigureWindowStyle','docked')
 frameii = fullPath;
 originalImage = imread(frameii);
 
 figure(1)
 imshow(originalImage)
 set(gca, 'YDir', 'normal')
-
 gray1 = im2gray(originalImage);
 
 figure(2)
 [BWmask, maskedImage1] = createMask_lighter(originalImage);
-
 imshow(BWmask)
-
-%structuring element for imdilate
-%se1 = strel('line',6,0);
-%se2 = strel('line',6,90);
-%imshow(imdilate(~BWmask,[se1 se2]))
-%set(gca, 'YDir', 'normal')
-%BWmask = ~imdilate(~BWmask,[se1 se2]);
 
 %% BWmask is the base image we're going to work with using blob counting
 % get labels for connected objects in BWmask (polygons)
@@ -66,57 +59,78 @@ pmeter_array = zeros(numberOfBoundaries,1);
 centroid_array = zeros(numberOfBoundaries,2);
 boxEdgeMask = zeros(numberOfBoundaries,1,'logical');
 
-vertexPositions = [];
-pixelBuffer = 1;
-for kk = 1 : numberOfBoundaries
-    thisBoundary = boundaries{kk};
-    %plot(thisBoundary(:,2), thisBoundary(:,1), 'g', 'LineWidth', 2);
-    %poly_kk = polyshape(thisBoundary(:,2),thisBoundary(:,1));
-    P_reduced = reducepoly(thisBoundary,0.02);
-    %reducepoly to reduce vertex density and do some smoothing
-    plot(P_reduced(:,2), P_reduced(:,1), 'r', 'linewidth', 1);
-    poly_kk = polyshape(P_reduced(:,2),P_reduced(:,1));
-    a_array(kk) = area(poly_kk);
-    pmeter_array(kk) = perimeter(poly_kk);
-    vertices = poly_kk.Vertices;
-    centroid_array(kk,:) = mean(vertices);
-    xMask = (vertices(:,1) < boxDims(1) - pixelBuffer) & (vertices(:,1) > pixelBuffer);
-    yMask = (vertices(:,2) < boxDims(2) - pixelBuffer) & (vertices(:,2) > pixelBuffer);
-    boxEdgeMask(kk) = all(xMask) & all(yMask);
+
+shapeArraysTolerance = zeros(length(reducePolyTolerance), 20);
+% looping over tolerances, record shapes to get standard error
+for ii = 1:length(reducePolyTolerance)
+    vertexPositions = [];
+    pixelBuffer = 1;
+    for kk = 1 : numberOfBoundaries
+        thisBoundary = boundaries{kk};
+    
+        P_reduced = reducepoly(thisBoundary,reducePolyTolerance(ii));
+        %reducepoly to reduce vertex density and do some smoothing
+    
+        plot(P_reduced(:,2), P_reduced(:,1), 'r', 'linewidth', 1);
+        poly_kk = polyshape(P_reduced(:,2),P_reduced(:,1));
+        a_array(kk) = area(poly_kk);
+        pmeter_array(kk) = perimeter(poly_kk);
+        vertices = poly_kk.Vertices;
+        centroid_array(kk,:) = mean(vertices);
+        xMask = (vertices(:,1) < boxDims(1) - pixelBuffer) & (vertices(:,1) > pixelBuffer);
+        yMask = (vertices(:,2) < boxDims(2) - pixelBuffer) & (vertices(:,2) > pixelBuffer);
+        boxEdgeMask(kk) = all(xMask) & all(yMask);
+    end
+    
+    %area mask thresholds polygons based on their areas
+    sorted_areas = sort(a_array);
+    [~,sort_order] = sort(pmeter_array);
+    lowBoundAreas = sorted_areas(1);
+    upBoundAreas = sorted_areas(end-2);
+    %areaMask = (a_array > lowBoundAreas) & (a_array < upBoundAreas);
+    areaMask = (a_array-median(a_array)<median(a_array));
+    
+    compositeMask = boxEdgeMask & areaMask;
+    
+    filteredPerimeter = pmeter_array(compositeMask);
+    filteredArea = a_array(compositeMask);
+    shapeParameters = filteredPerimeter.^2 ./ filteredArea / (4*pi);
+    mean(shapeParameters)
+
+    %save shapeParameters at this tolerance
+    shapeArraysTolerance(ii,1:length(shapeParameters)) = shapeParameters;
+    
+    scatter(centroid_array(compositeMask,1), centroid_array(compositeMask,2),'k','x')
+    
+    % for each valid segmented cell, record vertex positions separated by nans
+    % and a header, sorted increasing by cell perimeters
+    figure(6)
+    clf; hold on;
+    set(gca, 'YDir', 'reverse')
+    for kk = 1:numberOfBoundaries
+        jj = sort_order(kk);
+        thisBoundary = boundaries{jj};
+        if (compositeMask(jj) == false)
+            continue;
+        end
+        % fill vertexPositions with a header
+        vertexPositions = [vertexPositions; nan nan];
+        vertexPositions = [vertexPositions; kk length(thisBoundary(:,1))];
+        for ll = 1:length(thisBoundary(:,1))
+            %fill vertexPositions with lines of coordinates
+            vertexPositions = [vertexPositions; thisBoundary(ll,1) thisBoundary(ll,2)];
+        end
+        
+        % redo old plot to show new segmentation
+        P_reduced = reducepoly(thisBoundary,reducePolyTolerance(ii));
+        plot(P_reduced(:,2), P_reduced(:,1), 'r', 'linewidth', 1);
+        daspect([1 1 1])
+    end
+    figure(7)
+    scatter(vertexPositions(:,2), vertexPositions(:,1),'rx')
+    daspect([1 1 1])
 end
 
-%area mask thresholds polygons based on their areas
-sorted_areas = sort(a_array);
-[~,sort_order] = sort(pmeter_array);
-lowBoundAreas = sorted_areas(1);
-upBoundAreas = sorted_areas(end-2);
-%areaMask = (a_array > lowBoundAreas) & (a_array < upBoundAreas);
-areaMask = (a_array-median(a_array)<median(a_array));
-
-compositeMask = boxEdgeMask & areaMask;
-
-filteredPerimeter = pmeter_array(compositeMask);
-filteredArea = a_array(compositeMask);
-shapeParameters = filteredPerimeter.^2 ./ filteredArea / (4*pi);
-
-scatter(centroid_array(compositeMask,1), centroid_array(compositeMask,2),'k','x')
-
-% for each valid segmented cell, record vertex positions separated by nans
-% and a header, sorted increasing by cell perimeters
-for kk = 1:numberOfBoundaries
-    ii = sort_order(kk);
-    thisBoundary = boundaries{ii};
-    if (compositeMask(ii) == false)
-        continue;
-    end
-    % fill vertexPositions with a header
-    vertexPositions = [vertexPositions; nan nan];
-    vertexPositions = [vertexPositions; kk length(thisBoundary(:,1))];
-    for jj = 1:length(thisBoundary(:,1))
-        %fill vertexPositions with lines of coordinates
-        vertexPositions = [vertexPositions; thisBoundary(jj,1) thisBoundary(jj,2)];
-    end
-end
-figure(6)
-scatter(vertexPositions(:,2), vertexPositions(:,1),'rx')
-daspect([1 1 1])
+diffShapeArrays = diff(shapeArraysTolerance);
+diffShapeArrays(diffShapeArrays == 0) = [];
+std_error = sqrt(mean(diffShapeArrays.^2))
